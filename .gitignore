@@ -1,0 +1,25 @@
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python virtual environments
+venv/
+env/
+.env
+__pycache__/
+*.pyc
+
+# Build files
+build/
+*.o
+*.so
+*.dylib
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test output
+test_json.json
