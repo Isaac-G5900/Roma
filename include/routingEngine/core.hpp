@@ -1,7 +1,24 @@
 #pragma once
+#define _USE_MATH_DEFINES
 #include <memory>
 #include <vector>
+#include <string>
 #include <unordered_map>
+#include <utility>
+#include <functional>
+#include <math.h>
+
+//custom hash operator overload for origin, dest id pair mapping to edge object
+//for edges in graph class
+namespace std {
+    template <>
+    struct hash<std::pair<size_t, size_t>> {
+        std::size_t operator()(const std::pair<size_t, size_t>& k) const {
+            return std::hash<size_t>()(k.first) ^ (std::hash<size_t>()(k.second) << 1);
+        }
+    };
+}
+
 namespace routingEngine{
 
     struct Coordinate{
@@ -9,8 +26,26 @@ namespace routingEngine{
         double longitude;
         std::string name;
         Coordinate(double longitude, double latitude, std::string name="") : latitude(latitude), longitude(longitude), name(name) {}
+    };
 
-        // double computeDistance(const Coordinate& origin, const Coordinate& destination);
+    struct Edge{
+
+        size_t origin_id;
+        size_t destination_id;
+        double distance;
+        //size_t mph;
+        // double travel_time; <For future use when ETA's need to be taken into account>
+        std::string hierarchy; //What is the layer of this particular network? 
+                               //e.g. Highways, primary, secondary, etc.
+        std::string name;
+
+        //default constructor for edges unordered_map required for resize, insertion, etc.
+        //value types are required to be default constructable
+        Edge() : origin_id(0), destination_id(0), distance(0.0), hierarchy(""), name("") {}
+        Edge(size_t origin_id, size_t destination_id, double distance, std::string hierarchy="", std::string name="") : origin_id(origin_id), destination_id(destination_id), distance(distance), hierarchy(hierarchy), name(name) {}
+
+        static double getDistance(const Coordinate& origin, const Coordinate& destination);
+
     };
 
     class Graph{
@@ -26,10 +61,9 @@ namespace routingEngine{
                 std::string printNode();
             };
 
-            const Coordinate& getDistanceHelper(const Coordinate& start_coord, const Coordinate& destination_coord);
-
             std::vector<std::unique_ptr<GraphNode>> nodes;
             std::unordered_map<size_t, size_t> id_to_indexMap;
+            std::unordered_map<std::pair<size_t, size_t>, Edge> edges; //origin_id, dest_id : Edge object that connects them
             
         public:
 
@@ -68,13 +102,13 @@ namespace routingEngine{
 
             //getters
 
-            bool hasNode(size_t node_id) const;
+            inline bool hasNode(size_t node_id) const;
 
             // bool hasEdge(size_t node_id, size_t other_id) const;
             
-            size_t nodeCount() const;
+            inline size_t nodeCount() const;
 
-            bool empty() const;
+            inline bool empty() const;
 
             // std::vector<size_t> getneighborOf(size_t node_id) const; 
 

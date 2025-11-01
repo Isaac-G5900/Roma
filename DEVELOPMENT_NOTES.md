@@ -160,10 +160,65 @@ bool isValidNeighbor(GraphNode* neighbor) const {
 4. Connect ways at intersections (shared node IDs)
 5. Connect POIs to nearest road nodes
 
-## Next Steps
-1. Implement Edge struct
-2. Add HTTP streaming for large queries
-3. Complete way processing logic
-4. Implement A* pathfinding algorithm
-5. Add distance calculations between nodes
-6. Fix print formatting (remove trailing commas)
+## Recent Design Analysis and Next Steps
+
+### Space and Performance Considerations
+- The graph is designed to be lightweight, only loading nodes and edges within a relevant bounding box for each query.
+- For city-scale routing, this approach is efficient and keeps memory usage low.
+- For larger regions, consider streaming data from Overpass and incremental graph construction to avoid loading everything into memory.
+- Edge storage is currently a vector, but for fast lookups and scalability, an unordered_map keyed by node pairs or way IDs may be used in the future.
+
+### Edge and Path Construction
+- Edges are constructed between consecutive nodes in ways, storing origin/destination IDs and computed distance (Haversine formula).
+- Not all OSM ways have names; always check for the "name" tag and handle missing names gracefully.
+- For pathfinding, only the minimal graph (nodes, edges, weights) is loaded and used.
+- Path abstraction (as a sequence of edges) will be important for routing and can be added when implementing algorithms.
+
+### Pathfinding Strategy
+- Pathfinding (A*) operates on the cached subgraph within the bounding box.
+- If a query goes outside the cached region, update the cache before running pathfinding.
+- For performance, avoid storing unnecessary metadata or geometry unless needed for advanced features.
+- Use adjacency lists for neighbor lookups and consider unordered_map for edge storage if needed.
+
+### Next Immediate Steps
+1. Enhance the client script to stream and parse ways data from Overpass, keeping memory usage minimal.
+2. Update the graph loader to build edges from ways and only load relevant data for the current query region.
+3. Prepare for pathfinding by designing a minimal API for running A* on the loaded subgraph and handling POIs/intersections.
+
+### Architectural Note
+- The graph loader and data ingestion logic should be implemented as a separate routing engine service, not as part of the core graph class. This separation keeps the graph implementation focused on in-memory structure and algorithms, while the service handles data acquisition, parsing, and region management.
+- The routing engine service will be responsible for:
+  - Querying and streaming Overpass data
+  - Parsing ways, nodes, and POIs
+  - Managing bounding box regions and cache updates
+  - Invoking the core graph API to build/update the graph for pathfinding
+- This modular design improves maintainability, scalability, and testability of the overall system.
+
+## Graph Structure and Edge Storage Update
+
+- The core graph data structure is solid for in-memory routing and connectivity.
+- For scalability and fast edge lookups, switch from `std::vector<Edge>` to `std::unordered_map<EdgeKey, Edge>`, where `EdgeKey` is a struct of origin/destination node IDs.
+- This allows O(1) access to edge metadata and simplifies edge existence checks, updates, and removals.
+- The graph class should focus on representing nodes, neighbor relationships, and edge metadata, but not on search/pathfinding algorithms or data loading.
+
+## Separation of Concerns
+
+- **Graph Loader/Service:** Data ingestion (fetching, parsing, streaming from Overpass) should be handled by a separate loader or routing engine service, not by the graph class itself.
+- **Pathfinding Algorithms:** Search algorithms (A*, Dijkstra, bidirectional search) should be implemented as utilities in the `routingEngine` namespace, operating on the graph but not embedded within it.
+- This modular design keeps the graph class lean, focused on structure, and improves maintainability and testability.
+
+## POI-to-Way Connectivity Logic
+
+- When building the graph, connect POIs to ways by checking if the POI coordinates fall within the bounding box of a way's geometry, or by proximity threshold.
+- For each POI, create edges to nearby ways, then build routes by traversing intersecting ways, always moving closer to the destination.
+- Use hierarchy filtering (e.g., start with secondary roads) to keep the graph relevant and efficient for the query region.
+
+## Next Steps Recap
+
+1. Refactor edge storage in the graph class to use an unordered_map for scalability.
+2. Keep search/pathfinding logic outside the graph class, as utilities in the routing engine namespace.
+3. Enhance the loader/service to stream and parse ways and POIs, then populate the graph.
+4. Implement POI-to-way connectivity logic using bounding box or proximity checks.
+5. Prepare for bidirectional A* pathfinding using the updated graph structure.
+
+---

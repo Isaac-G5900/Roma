@@ -4,6 +4,7 @@ project(routingEngine)
 add_library(routingEngine src/core.cpp)
 
 target_compile_features(routingEngine PUBLIC cxx_std_20)
+set(CMAKE_BUILD_TYPE Debug)
 target_include_directories(routingEngine
 PUBLIC $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
 $<INSTALL_INTERFACE:include>)

@@ -1,18 +1,17 @@
 #include <routingEngine/core.hpp>
 #include <iostream>
-#include <string>
 namespace routingEngine{
     //maybe have this return an edge object at somepoint?
     // double Coordinate::computeDistance(const Coordinate& origin, const Coordinate& destination)
 
     //Graph impl
 
-    Graph::Graph() : nodes () {}
+    Graph::Graph() : nodes (), edges() {}
 
-    Graph::Graph(const Graph& other) : nodes(){
+    Graph::Graph(const Graph& other) : nodes(), edges(){
 
         nodes.reserve(other.nodes.size());
-
+        edges.reserve(other.edges.size());
         for(const auto& node : other.nodes){
             this->id_to_indexMap[node->id] = addNode(node->coords->latitude, node->coords->longitude, node->id, node->coords->name);
         }
@@ -21,6 +20,10 @@ namespace routingEngine{
             for(const auto& neighbor : node->neighborList){
                 addEdge(node->id, neighbor->id);
             }
+        }
+
+        for(const auto& [id, edge] : other.edges){
+            this->edges[id] = edge;
         }
     }
 
@@ -39,6 +42,7 @@ namespace routingEngine{
         if(this != &other){
             this->nodes = std::move(other.nodes);
             this->id_to_indexMap = std::move(other.id_to_indexMap);
+            this->edges = std::move(other.edges);
         }
 
         return *this;
@@ -57,13 +61,36 @@ namespace routingEngine{
         return index;
     };
 
+
+    const static double EarthRadiusKm = 6372.8;
+
+    //using formula of the haversine distance to compute distances along
+    //spherical geometry
+    double Edge::getDistance(const Coordinate& origin, const Coordinate& destination){
+        //conversion from degrees to radians
+        //with use of math.h macro defining pi value
+        
+        double radianOriginLat = (origin.latitude * M_PI) / 180.0;
+        double radianOriginLong = (origin.longitude * M_PI) / 180.0;
+        double radianDestinationLat = (destination.latitude * M_PI) / 180.0;
+        double radianDestinationLong = (destination.longitude * M_PI) / 180.0;
+
+        double latitudeDiff = radianDestinationLat - radianOriginLat;
+        double longitudeDiff = radianDestinationLong - radianOriginLong;
+
+        double computation = asin(sqrt(sin(latitudeDiff / 2) * sin(latitudeDiff / 2) + cos(radianOriginLat) * cos(radianDestinationLat) * sin(longitudeDiff / 2) * sin(longitudeDiff / 2)));
+	    return 2 * EarthRadiusKm * computation;
+    }
+
     bool Graph::addEdge(size_t origin_id, size_t destination_id){
-        if(origin_id == destination_id || !hasNode(origin_id)|| !hasNode(destination_id)){
+        if(origin_id == destination_id || !hasNode(origin_id) || !hasNode(destination_id)){
             return false;
         }
         size_t origin_index = id_to_indexMap[origin_id];
         size_t destination_index = id_to_indexMap[destination_id];
         nodes[origin_index]->neighborList.push_back(nodes[destination_index].get());
+        double distance = Edge::getDistance(*(nodes[origin_index]->coords), *(nodes[destination_index]->coords));//make call to get distance and store then pass to constructor for edge and add to edge list of the graph
+        edges[std::make_pair(origin_id, destination_id)] = Edge(origin_id, destination_id, distance);
         return true;
     }
 
@@ -87,7 +114,7 @@ namespace routingEngine{
 
     //getters
 
-    bool Graph::hasNode(size_t node_id) const{
+    inline bool Graph::hasNode(size_t node_id) const{
         return id_to_indexMap.find(node_id) != id_to_indexMap.end();
     }
 
@@ -95,11 +122,11 @@ namespace routingEngine{
 
     // };
     
-    size_t Graph::nodeCount() const{
+    inline size_t Graph::nodeCount() const{
         return nodes.size();
     };
 
-    bool Graph::empty() const{
+    inline bool Graph::empty() const{
         return nodes.empty();
     };
 
