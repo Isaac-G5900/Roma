@@ -8,11 +8,13 @@ Building a routing engine using Overpass API data to create a graph of Points of
 ### Graph Structure (`core.cpp`)
 - **Graph class** with `std::vector<std::unique_ptr<GraphNode>>` for node storage
 - **O(1) node lookup** via `std::unordered_map<size_t, size_t> id_to_indexMap`
+- **Edge storage** via `std::unordered_map<std::pair<size_t, size_t>, Edge>` for O(1) edge lookups
 - **GraphNode** contains:
   - `id`, `coords` (lat/lon/name), `index`
   - `std::vector<GraphNode*> neighborList` (raw pointers to neighbors)
-- **Memory management**: `unique_ptr` owns nodes, raw pointers in neighbor lists are safe (no node removal planned)
+- **Memory management**: `unique_ptr` owns nodes, raw pointers in neighbor lists are safe (validated with Valgrind - no leaks)
 - **Copy/move semantics** implemented for Graph class
+- **Edge struct** includes default constructor for STL container compatibility
 
 ### Implemented Methods
 - `addNode()` - Returns index of added node, handles optional name parameter
@@ -29,8 +31,8 @@ Building a routing engine using Overpass API data to create a graph of Points of
 - `findNode()` (commented out)
 
 ### Copy/Move Constructor Details
-- **Copy constructor**: First adds all nodes, then recreates all edges
-- **Move constructor**: Transfers ownership of `nodes` and `id_to_indexMap`
+- **Copy constructor**: First adds all nodes, then recreates all edges using `addEdge()`
+- **Move constructor**: Transfers ownership of `nodes`, `id_to_indexMap`, and `edges`
 - **Assignment operators**: Use copy-and-swap idiom for exception safety
 
 ## Overpass API Data Structure
@@ -76,77 +78,49 @@ out geom;
 
 ## Planned Improvements
 
-### Edge Struct
-```cpp
-struct Edge {
-    size_t from_id;
-    size_t to_id;
-    double weight;          // distance/time
-    std::string road_name;  // optional metadata
-};
-```
-
-### HTTP Streaming (Large Queries)
+### HTTP Streaming (Large Queries) - IMPLEMENTED
 - **Problem**: `overpy` loads entire result into memory
 - **Solution**: Use `requests` + `ijson` for incremental JSON parsing
 - **Benefits**: Handle city-wide queries without memory issues
+- **Status**: Basic streaming client implemented in `tests/overpassClient_stream.py`
 
-### A* Pathfinding
+### A* Pathfinding - PLANNED
 - **Heuristic**: Haversine distance to destination
 - **Edge weights**: Real distances between consecutive nodes
 - **Return**: Sequence of node IDs forming optimal path
+- **Implementation**: Will be in `routingEngine` namespace utilities, separate from graph class
 
 ## Technical Considerations
 
-### Memory Management
+### Memory Management - VALIDATED
 - ✅ `unique_ptr` ownership model works for static road networks
-- ✅ Raw pointers in neighbor lists safe (no node removal)
-- ⚠️ Potential dangling pointers if node removal implemented later
+- ✅ Raw pointers in neighbor lists safe (no node removal planned)
+- ✅ **Valgrind tested**: No memory leaks, 0 errors, clean allocation/deallocation
+- ✅ **Edge storage**: Upgraded to `std::unordered_map<std::pair<size_t, size_t>, Edge>` for O(1) lookups
+- ✅ **Custom hash**: Implemented for `std::pair<size_t, size_t>` to ensure compiler compatibility
 
-### Dangling Reference Risk Solutions
-
-#### Option 1: Node IDs (Safest, Medium Refactor)
+### Current Edge Implementation - COMPLETED
 ```cpp
-std::vector<size_t> neighborList;  // Store IDs instead of pointers
+struct Edge {
+    size_t origin_id;
+    size_t destination_id;
+    double distance;
+    std::string hierarchy;  // Road type metadata
+    std::string name;       // Way name
+    
+    Edge();  // Default constructor for STL containers
+    Edge(size_t origin_id, size_t destination_id, double distance, 
+         std::string hierarchy="", std::string name="");
+    
+    static double getDistance(const Coordinate& origin, const Coordinate& destination);
+};
 ```
-**Pros**: 
-- Zero dangling pointer risk
-- Works with node removal
-- Memory efficient
 
-**Cons**: 
-- Need to refactor `addEdge()`, copy constructor, `printNode()`
-- Extra lookup required: `nodes[id_to_indexMap[neighbor_id]]`
-
-#### Option 2: `std::weak_ptr` (Safe, Major Refactor)
-```cpp
-std::vector<std::weak_ptr<GraphNode>> neighborList;
-```
-**Pros**: 
-- No dangling pointers (`expired()` check)
-- Pointer semantics preserved
-
-**Cons**: 
-- Need to change `nodes` to `std::vector<std::shared_ptr<GraphNode>>`
-- Major refactor required
-- More memory overhead
-
-#### Option 3: Keep Current + Safety Checks (Minimal Change)
-```cpp
-// Add validation methods
-bool isValidNeighbor(GraphNode* neighbor) const {
-    return id_to_indexMap.find(neighbor->id) != id_to_indexMap.end();
-}
-```
-**Pros**: 
-- Minimal code changes
-- Fast access
-
-**Cons**: 
-- Still unsafe if you implement node removal
-- Runtime checks needed
-
-**Recommendation**: Use Node IDs (Option 1) for long-term robustness.
+**Key Features:**
+- Default constructor enables use in STL containers
+- Static Haversine distance calculation method
+- Supports road hierarchy and name metadata
+- Stored in `std::unordered_map<std::pair<size_t, size_t>, Edge>` for O(1) access
 
 ### Query Optimization
 - **Current**: Small bounding box (~4km × 6km) - manageable
@@ -166,7 +140,7 @@ bool isValidNeighbor(GraphNode* neighbor) const {
 - The graph is designed to be lightweight, only loading nodes and edges within a relevant bounding box for each query.
 - For city-scale routing, this approach is efficient and keeps memory usage low.
 - For larger regions, consider streaming data from Overpass and incremental graph construction to avoid loading everything into memory.
-- Edge storage is currently a vector, but for fast lookups and scalability, an unordered_map keyed by node pairs or way IDs may be used in the future.
+- ✅ **Edge storage**: Uses `std::unordered_map<std::pair<size_t, size_t>, Edge>` for O(1) edge lookups and scalability.
 
 ### Edge and Path Construction
 - Edges are constructed between consecutive nodes in ways, storing origin/destination IDs and computed distance (Haversine formula).
@@ -178,12 +152,14 @@ bool isValidNeighbor(GraphNode* neighbor) const {
 - Pathfinding (A*) operates on the cached subgraph within the bounding box.
 - If a query goes outside the cached region, update the cache before running pathfinding.
 - For performance, avoid storing unnecessary metadata or geometry unless needed for advanced features.
-- Use adjacency lists for neighbor lookups and consider unordered_map for edge storage if needed.
+- Use `neighborList` for fast neighbor access and `edges` map for O(1) edge metadata lookup.
 
 ### Next Immediate Steps
-1. Enhance the client script to stream and parse ways data from Overpass, keeping memory usage minimal.
-2. Update the graph loader to build edges from ways and only load relevant data for the current query region.
-3. Prepare for pathfinding by designing a minimal API for running A* on the loaded subgraph and handling POIs/intersections.
+1. ✅ **COMPLETED**: Refactor edge storage to use unordered_map for scalability
+2. ✅ **COMPLETED**: Memory validation with Valgrind - no leaks detected
+3. 🔄 **IN PROGRESS**: Enhance the client script to stream and parse ways data from Overpass
+4. **TODO**: Implement POI-to-way connectivity logic using bounding box or proximity checks
+5. **TODO**: Design pathfinding utilities in routingEngine namespace (separate from graph class)
 
 ### Architectural Note
 - The graph loader and data ingestion logic should be implemented as a separate routing engine service, not as part of the core graph class. This separation keeps the graph implementation focused on in-memory structure and algorithms, while the service handles data acquisition, parsing, and region management.
@@ -194,31 +170,43 @@ bool isValidNeighbor(GraphNode* neighbor) const {
   - Invoking the core graph API to build/update the graph for pathfinding
 - This modular design improves maintainability, scalability, and testability of the overall system.
 
-## Graph Structure and Edge Storage Update
+## Graph Structure and Edge Storage Update - COMPLETED
 
-- The core graph data structure is solid for in-memory routing and connectivity.
-- For scalability and fast edge lookups, switch from `std::vector<Edge>` to `std::unordered_map<EdgeKey, Edge>`, where `EdgeKey` is a struct of origin/destination node IDs.
-- This allows O(1) access to edge metadata and simplifies edge existence checks, updates, and removals.
-- The graph class should focus on representing nodes, neighbor relationships, and edge metadata, but not on search/pathfinding algorithms or data loading.
+- ✅ **IMPLEMENTED**: Edge storage upgraded from `std::vector<Edge>` to `std::unordered_map<std::pair<size_t, size_t>, Edge>`
+- ✅ **PERFORMANCE**: O(1) access to edge metadata, simplified edge existence checks, updates, and removals
+- ✅ **ARCHITECTURE**: Graph class focuses on representing nodes, neighbor relationships, and edge metadata
+- ✅ **SEPARATION**: Search/pathfinding algorithms planned for `routingEngine` namespace utilities
 
-## Separation of Concerns
+## Separation of Concerns - DESIGNED
 
-- **Graph Loader/Service:** Data ingestion (fetching, parsing, streaming from Overpass) should be handled by a separate loader or routing engine service, not by the graph class itself.
-- **Pathfinding Algorithms:** Search algorithms (A*, Dijkstra, bidirectional search) should be implemented as utilities in the `routingEngine` namespace, operating on the graph but not embedded within it.
-- This modular design keeps the graph class lean, focused on structure, and improves maintainability and testability.
+- **Graph Loader/Service:** Data ingestion (fetching, parsing, streaming from Overpass) handled by separate service
+- **Pathfinding Algorithms:** Search algorithms (A*, Dijkstra, bidirectional search) implemented as utilities in the `routingEngine` namespace
+- **Core Graph:** Focused on in-memory structure and basic operations (add/remove nodes/edges, neighbor access)
+- This modular design improves maintainability, scalability, and testability.
 
-## POI-to-Way Connectivity Logic
+## POI-to-Way Connectivity Logic - PLANNED
 
-- When building the graph, connect POIs to ways by checking if the POI coordinates fall within the bounding box of a way's geometry, or by proximity threshold.
-- For each POI, create edges to nearby ways, then build routes by traversing intersecting ways, always moving closer to the destination.
-- Use hierarchy filtering (e.g., start with secondary roads) to keep the graph relevant and efficient for the query region.
+- Connect POIs to ways by checking if POI coordinates fall within the bounding box of a way's geometry, or by proximity threshold
+- Create edges to nearby ways, then build routes by traversing intersecting ways
+- Use hierarchy filtering (e.g., start with secondary roads) for efficiency
+- Bidirectional A* to expand from both origin and destination
 
-## Next Steps Recap
+## Implementation Status Summary
 
-1. Refactor edge storage in the graph class to use an unordered_map for scalability.
-2. Keep search/pathfinding logic outside the graph class, as utilities in the routing engine namespace.
-3. Enhance the loader/service to stream and parse ways and POIs, then populate the graph.
-4. Implement POI-to-way connectivity logic using bounding box or proximity checks.
-5. Prepare for bidirectional A* pathfinding using the updated graph structure.
+✅ **COMPLETED**:
+- Core graph data structure with smart pointer management
+- Edge storage with O(1) lookup performance
+- Memory leak validation with Valgrind
+- Basic streaming client infrastructure
+- Custom hash implementation for edge keys
+
+🔄 **IN PROGRESS**:
+- Overpass data streaming and parsing
+- POI-to-way connectivity logic
+
+**TODO**:
+- Pathfinding algorithm implementation
+- Graph loader service
+- Performance testing with real-world data
 
 ---
