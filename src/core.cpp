@@ -6,25 +6,30 @@ namespace routingEngine{
 
     //Graph impl
 
-    Graph::Graph() : nodes (), edges() {}
+    Graph::Graph() : nodes (), edges() {
+        nodes.reserve(1000);
+        id_to_indexMap.reserve(1000);
+        edges.reserve(2000);
+    }
 
     Graph::Graph(const Graph& other) : nodes(), edges(){
 
         nodes.reserve(other.nodes.size());
         edges.reserve(other.edges.size());
+        id_to_indexMap.reserve(other.id_to_indexMap.size());
         for(const auto& node : other.nodes){
             this->id_to_indexMap[node->id] = addNode(node->coords->latitude, node->coords->longitude, node->id, node->coords->name);
         }
 
-        for(const auto& node : other.nodes){
-            for(const auto& neighbor : node->neighborList){
-                addEdge(node->id, neighbor->id);
-            }
+        //have to refactor..
+
+        for(const auto& [key, edge] : other.edges){
+            addEdge(edge.origin_id, edge.destination_id, edge.name, edge.hierarchy);
         }
 
-        for(const auto& [id, edge] : other.edges){
-            this->edges[id] = edge;
-        }
+        // for(const auto& [id, edge] : other.edges){
+        //     this->edges[id] = edge;
+        // }
     }
 
     Graph& Graph::operator=(const Graph& other){
@@ -52,7 +57,7 @@ namespace routingEngine{
     //Active operations
 
     //for utility purposes, successful operation returns the index of the added node.
-    size_t Graph::addNode(double latitude, double longitude, size_t id, const std::string& name=""){
+    size_t Graph::addNode(double latitude, double longitude, size_t id, const std::string& name){
         size_t index = this->nodes.size(); //starts as 0 if the first newNode added to Graph
         auto newNode = std::make_unique<GraphNode>(latitude, longitude, id, std::vector<GraphNode*>{}, index);
         if(name != ""){newNode->coords->name = name;}
@@ -82,7 +87,7 @@ namespace routingEngine{
 	    return 2 * EarthRadiusKm * computation;
     }
 
-    bool Graph::addEdge(size_t origin_id, size_t destination_id){
+    bool Graph::addEdge(size_t origin_id, size_t destination_id, const std::string& heirarchy, const std::string& name){
         if(origin_id == destination_id || !hasNode(origin_id) || !hasNode(destination_id)){
             return false;
         }
@@ -90,14 +95,25 @@ namespace routingEngine{
         size_t destination_index = id_to_indexMap[destination_id];
         nodes[origin_index]->neighborList.push_back(nodes[destination_index].get());
         double distance = Edge::getDistance(*(nodes[origin_index]->coords), *(nodes[destination_index]->coords));//make call to get distance and store then pass to constructor for edge and add to edge list of the graph
-        edges[std::make_pair(origin_id, destination_id)] = Edge(origin_id, destination_id, distance);
+        edges[std::make_pair(origin_id, destination_id)] = Edge(origin_id, destination_id, distance, heirarchy, name);
         return true;
     }
 
-    bool Graph::addArc(size_t first_id, size_t second_id){
-        return Graph::addEdge(first_id, second_id) && Graph::addEdge(second_id, first_id);
-    }
+    // bool Graph::addEdge(size_t origin_id, size_t destination_id){
+    //     if(origin_id == destination_id || !hasNode(origin_id) || !hasNode(destination_id)){
+    //         return false;
+    //     }
+    //     size_t origin_index = id_to_indexMap[origin_id];
+    //     size_t destination_index = id_to_indexMap[destination_id];
+    //     nodes[origin_index]->neighborList.push_back(nodes[destination_index].get());
+    //     double distance = Edge::getDistance(*(nodes[origin_index]->coords), *(nodes[destination_index]->coords));//make call to get distance and store then pass to constructor for edge and add to edge list of the graph
+    //     edges[std::make_pair(origin_id, destination_id)] = Edge(origin_id, destination_id, distance);
+    //     return true;
+    // }
 
+    bool Graph::addArc(Edge forwardEdge, Edge reverseEdge){
+        return Graph::addEdge(forwardEdge.origin_id, forwardEdge.destination_id, forwardEdge.hierarchy, forwardEdge.name) && Graph::addEdge(reverseEdge.origin_id, reverseEdge.destination_id, reverseEdge.hierarchy, reverseEdge.name);
+    }
     // GraphNode* Graph::findNode(size_t node_id){
     //     if(!(hasNode(node_id))){throw std::out_of_range("Invalid node ID given");}
     //     return nodes[node_id].get();
@@ -114,7 +130,7 @@ namespace routingEngine{
 
     //getters
 
-    inline bool Graph::hasNode(size_t node_id) const{
+    inline bool Graph::hasNode(size_t node_id) const {
         return id_to_indexMap.find(node_id) != id_to_indexMap.end();
     }
 
@@ -168,6 +184,13 @@ namespace routingEngine{
         nodeList.pop_back();
         nodeList.pop_back();
         std::cout << nodeList + "]";
+    }
+
+    //utility if the user knows the load in advance to alleviate vector allocation overhead
+    void Graph::graphReserve(size_t nodeCount){
+        nodes.reserve(nodeCount);
+        id_to_indexMap.reserve(nodeCount);
+        edges.reserve(nodeCount<<1); //approximately twice as much as expected count
     }
 
 }

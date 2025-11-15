@@ -56,7 +56,9 @@ namespace routingEngine{
                 size_t id;
                 size_t index;
                 GraphNode(double longitude, double latitude, size_t id, std::vector<GraphNode*> neighborList = {}, size_t index = 0) : index(index), id(id),
-                coords(std::make_unique<Coordinate>(longitude, latitude)), neighborList(neighborList) {}
+                coords(std::make_unique<Coordinate>(longitude, latitude)), neighborList(neighborList) {
+                    neighborList.reserve(10);
+                }
                 
                 std::string printNode();
             };
@@ -83,11 +85,15 @@ namespace routingEngine{
 
             //Active operations
             
-            size_t addNode(double latitude, double longitude, size_t id, const std::string& name);
+            size_t addNode(double latitude, double longitude, size_t id, const std::string& name="");
 
-            bool addEdge(size_t origin_id, size_t destination_id);
+
+            bool addEdge(size_t origin_id, size_t destination_id, const std::string& heirarchy="", const std::string& name="");
+            //bool addEdge(size_t origin_id, size_t destination_id);
             
-            bool addArc(size_t first_id, size_t second_id);
+
+            //Change impl to take Edge structs for accuracy of different meta data of ways
+            bool addArc(Edge forwardEdge, Edge reverseEdge);
 
             // GraphNode* findNode(size_t node_id);
 
@@ -115,6 +121,8 @@ namespace routingEngine{
             // double getDistance(size_t node_id, size_t other_id);
 
             void printGraph();
+
+            void graphReserve(size_t nodeCount);
     };
 
 }
